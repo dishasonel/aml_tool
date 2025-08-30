@@ -1,12 +1,12 @@
 # 🕵️ AML Detection Dashboard
 
 An **Anti-Money Laundering (AML) detection system** that combines:
-- 📊 Interactive **dashboard** (HTML/JS frontend)
-- 🧠 **Machine learning (Isolation Forest)** for anomaly detection
-- 🔗 **Graph-based analysis** for cycles and fan-in/out detection
-- 📑 Export options (CSV/PDF)
-- 👤 Multi-region **admin login**
-
+- Admin Login System with region-based access (Indore, Bhopal, Dewas).
+- CSV Upload & Analysis of transactions.
+- Machine Learning (Isolation Forest) for anomaly detection.
+- Graph Analysis to identify fan-in, fan-out, and cycle patterns.
+- Interactive Dashboard with transaction graphs, scatter plots, and suspicious transaction tables.
+- Alert System to notify users about risky activities.
 ---
 
 ## 🚀 Features
