@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AML Detection Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<!-- libs -->
+<script src="https://cdn.jsdelivr.net/npm/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+
+<style>
+  body { margin:0; background:#0f172a; color:#e5e7eb; font-family:system-ui, sans-serif; }
+  header { display:flex; align-items:center; justify-content:space-between; padding:16px 24px; background:#0b1224; position:sticky; top:0; z-index:5; border-bottom:1px solid #1f2937; }
+  .brand { color:#38bdf8; font-weight:800; }
+  .controls { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  input[type="file"], button, input[type="text"] { padding:8px 10px; border-radius:10px; border:1px solid #1f2937; background:#111827; color:#e5e7eb; }
+  button { background:#0c4a6e; border:1px solid #155e75; cursor:pointer; }
+  button:hover { background:#155e75; }
+  main { padding:20px; max-width:1400px; margin:auto; }
+  .grid { display:grid; gap:16px; }
+  .cols-3 { grid-template-columns: repeat(3, 1fr); }
+  .cols-2 { grid-template-columns: 1fr 1fr; }
+  .card { background:#111827; padding:16px; border-radius:14px; border:1px solid #1f2937; }
+  .kpi { font-size:26px; font-weight:700; margin-top:6px; }
+  #graph { height:440px; border-radius:12px; border:1px solid #1f2937; background:#0f172a; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { padding:8px; border-bottom:1px solid #1f2937; font-size:14px; }
+  .tag { padding:2px 8px; border-radius:999px; font-size:12px; display:inline-block; }
+  .tag-red { background:#7f1d1d; color:#fee2e2; }
+  .tag-amber { background:#78350f; color:#ffedd5; }
+  .tag-cyan { background:#0e7490; color:#cffafe; }
+
+  /* toast */
+  #toast { position: fixed; right: 20px; top: 20px; min-width: 280px; max-width: 380px;
+    padding: 12px 14px; border-radius: 12px; background: #dc2626; color:#fff;
+    box-shadow:0 10px 30px rgba(0,0,0,.4); display:none; z-index: 9999; }
+  #toast.small { background:#f59e0b; }
+  #toast .t-title { font-weight:800; margin-bottom:6px; }
+  #toast .t-body { font-size:14px; opacity:.95; }
+  #toast .close { position:absolute; right:8px; top:4px; cursor:pointer; }
+
+  /* popup */
+  #backdrop {
+    position:fixed; inset:0; background:rgba(0,0,0,.55); display:none; z-index:9998;
+  }
+  #popup {
+    position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+    background:#1e293b; padding:18px; border-radius:12px; border:1px solid #334155;
+    display:none; z-index:9999; width:720px; max-width:95vw; max-height:85vh; overflow:auto; color:#e5e7eb;
+  }
+  #popup h3 { margin:4px 0 10px 0; }
+  #popup table { width:100%; border-collapse:collapse; }
+  #popup th, #popup td { border-bottom:1px solid #334155; padding:6px; font-size:13px; }
+  #popup .actions { margin-top:12px; display:flex; gap:10px; }
+  #popup .pill { border:1px solid #334155; padding:2px 8px; border-radius:999px; font-size:12px; }
+  .row-susp { background:#7f1d1d22; } /* light red wash */
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">AML Dashboard – {{ region }}</div>
+  <div class="controls">
+    <input id="file" type="file" accept=".csv">
+    <button onclick="analyze()">Analyze</button>
+    <a href="/logout" style="color:#38bdf8;text-decoration:none;padding:8px 10px;border:1px solid #1f2937;border-radius:10px;">Logout ({{ user }})</a>
+  </div>
+</header>
+
+<main>
+  <div class="grid cols-3">
+    <div class="card"><div>Total Rows</div><div class="kpi" id="kpiRows">—</div></div>
+    <div class="card"><div>Suspicious</div><div class="kpi" id="kpiSusp">—</div></div>
+    <div class="card"><div>Cycles Detected</div><div class="kpi" id="kpiCycles">—</div></div>
+  </div>
+
+  <div class="grid cols-2" style="margin-top:16px">
+    <div class="card">
+      <h3 style="margin-top:0">Transaction Graph</h3>
+      <div id="graph"></div>
+      <div style="margin-top:8px; font-size:12px; opacity:.85;">
+        <span class="pill">Nodes: Accounts</span>
+        <span class="pill">Red edges: Suspicious</span>
+        <span class="pill">Orange edges: In cycle</span>
+        <span class="pill">Click a node or edge for details</span>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Amount Scatter</h3>
+      <canvas id="scatter"></canvas>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h3 style="margin-top:0">Suspicious Transactions</h3>
+    <input id="searchInput" type="text" placeholder="Search by ID, source, destination…" oninput="applySuspiciousFilter()" style="margin-bottom:10px;width:100%">
+    <table id="suspTable"><thead></thead><tbody></tbody></table>
+  </div>
+</main>
+
+<!-- toast -->
+<div id="toast"><div class="close" onclick="hideToast()">✕</div><div class="t-title" id="toastTitle">Alert</div><div class="t-body" id="toastBody">—</div></div>
+
+<!-- popup -->
+<div id="backdrop" onclick="closePopup()"></div>
+<div id="popup">
+  <h3 id="popupTitle">Details</h3>
+  <div id="popupBody">—</div>
+  <div class="actions">
+    <button onclick="downloadCSV()">Download CSV</button>
+    <button onclick="downloadPDF()">Download PDF</button>
+    <button onclick="closePopup()">Close</button>
+  </div>
+</div>
+
+<script>
+let resultRows = [];
+let suspRows = [];
+let filteredSusp = [];
+let scatterChart = null;
+let cy = null;
+let selectedTxns = []; // what the popup is currently showing (single txn or many for a node)
+
+// Toast helpers
+function showToast(title, body, severity="high"){
+  const t = document.getElementById("toast");
+  t.classList.toggle("small", severity !== "high");
+  document.getElementById("toastTitle").innerText = title;
+  document.getElementById("toastBody").innerText = body;
+  t.style.display = "block";
+  clearTimeout(window.__toastTimer);
+  window.__toastTimer = setTimeout(()=>{ t.style.display="none"; }, 6000);
+}
+function hideToast(){ document.getElementById("toast").style.display="none"; }
+
+// Analyze flow
+async function analyze(){
+  const f = document.getElementById("file").files[0];
+  if(!f){ showToast("No file", "Upload a CSV before analyzing.", "medium"); return; }
+
+  const fd = new FormData();
+  fd.append("file", f);
+
+  let res;
+  try{
+    res = await fetch("/analyze", { method:"POST", body: fd });
+  }catch(e){
+    showToast("Network error", "Backend not reachable.", "high");
+    return;
+  }
+
+  if(!res.ok){
+    const msg = await res.text();
+    showToast("Analysis failed", msg || "See server logs.", "high");
+    return;
+  }
+
+  const data = await res.json();
+  resultRows = data.rows || [];
+  suspRows = resultRows.filter(r => r.susp === 1);
+  filteredSusp = [...suspRows];
+
+  document.getElementById("kpiRows").innerText = resultRows.length;
+  document.getElementById("kpiSusp").innerText = suspRows.length;
+  document.getElementById("kpiCycles").innerText = (data.cycles || []).length;
+
+  // Alerts summary
+  if (suspRows.length > 0) {
+    showToast("Suspicious activity detected",
+      `${suspRows.length} suspicious transaction(s) found. Click graph nodes or edges for details.`);
+  } else {
+    showToast("All clear", "No suspicious transactions detected in this file.", "medium");
+  }
+
+  renderSuspTable();
+  drawGraph();
+  drawScatter();
+}
+
+// Suspicious table + search
+function renderSuspTable(){
+  const head = document.querySelector("#suspTable thead");
+  const body = document.querySelector("#suspTable tbody");
+  head.innerHTML = "<tr><th>ID</th><th>Src</th><th>Dst</th><th>Amount</th><th>Type</th><th>Risk</th><th>Cycle</th><th>Reasons</th></tr>";
+  body.innerHTML = "";
+
+  filteredSusp.forEach(r=>{
+    const tr = document.createElement("tr");
+    const cyc = r.in_cycle ? '<span class="tag tag-red">Cycle</span>' : '<span class="tag tag-cyan">No</span>';
+    tr.className = r.susp ? "row-susp" : "";
+    tr.innerHTML = `
+      <td>${r.id}</td>
+      <td>${r.src}</td>
+      <td>${r.dst}</td>
+      <td>${Number(r.amount).toLocaleString()}</td>
+      <td>${r.type}</td>
+      <td>${r.risk}</td>
+      <td>${cyc}</td>
+      <td>${r.reasons}</td>`;
+    body.appendChild(tr);
+  });
+}
+
+function applySuspiciousFilter(){
+  const q = (document.getElementById("searchInput").value || "").toLowerCase();
+  filteredSusp = suspRows.filter(r =>
+       String(r.id).toLowerCase().includes(q)
+    || String(r.src).toLowerCase().includes(q)
+    || String(r.dst).toLowerCase().includes(q)
+  );
+  renderSuspTable();
+}
+
+// Graph with node & edge popups
+function drawGraph(){
+  // Build elements and node transaction map
+  const elements = [];
+  const seen = new Set();
+  const nodeTxns = {}; // nodeId -> list of txns
+
+  resultRows.forEach(r=>{
+    const s = String(r.src), d = String(r.dst);
+    if(!seen.has(s)){ elements.push({ data:{ id:s, label:s } }); seen.add(s); }
+    if(!seen.has(d)){ elements.push({ data:{ id:d, label:d } }); seen.add(d); }
+
+    // maintain adjacency lists
+    nodeTxns[s] = nodeTxns[s] || [];
+    nodeTxns[d] = nodeTxns[d] || [];
+    nodeTxns[s].push(r);
+    nodeTxns[d].push(r);
+
+    // edge carries full txn info as stringified JSON
+    elements.push({
+      data:{
+        id: String(r.id),
+        source: s,
+        target: d,
+        susp: r.susp ? 1 : 0,
+        cycle: r.in_cycle ? 1 : 0,
+        info: JSON.stringify(r)
+      }
+    });
+  });
+
+  if (cy) cy.destroy();
+  cy = cytoscape({
+    container: document.getElementById("graph"),
+    elements,
+    style: [
+      { selector: "node",
+        style: {
+          "background-color": "#38bdf8",
+          "label": "data(label)",
+          "color": "#e5e7eb",
+          "font-size": "10px",
+          "text-wrap": "wrap",
+          "text-max-width": "120px"
+        }
+      },
+      { selector: "edge",
+        style: { "line-color": "#646e7a", "width": 1 }
+      },
+      { selector: "edge[susp=1]",
+        style: { "line-color": "#ef4444", "width": 2 }
+      },
+      { selector: "edge[cycle=1]",
+        style: { "line-color": "#f59e0b", "width": 3, "target-arrow-shape": "triangle", "target-arrow-color": "#f59e0b" }
+      },
+      { selector: ".selected",
+        style: { "border-width": 3, "border-color": "#a78bfa" }
+      }
+    ],
+    layout:{ name:"cose" }
+  });
+
+  // Node click: show all txns connected to that account
+  cy.on("tap", "node", evt=>{
+    cy.elements().removeClass("selected");
+    const node = evt.target;
+    node.addClass("selected");
+    const account = node.id();
+    const txns = (nodeTxns[account] || []).slice().sort((a,b)=>b.risk - a.risk);
+    selectedTxns = txns;
+
+    // Alert if suspicious found around this node
+    const suspCount = txns.filter(t=>t.susp===1).length;
+    if (suspCount > 0) {
+      showToast("Suspicious node activity",
+        `${suspCount} suspicious txn(s) for account ${account}.`);
+    }
+
+    openPopupTxns(`Account: ${account}`, txns);
+  });
+
+  // Edge click: show single txn
+  cy.on("tap", "edge", evt=>{
+    cy.elements().removeClass("selected");
+    const edge = evt.target;
+    edge.addClass("selected");
+    const r = JSON.parse(edge.data("info"));
+    selectedTxns = [r];
+    openPopupTxns(`Transaction ${r.id}`, [r]);
+  });
+}
+
+// Popup helpers
+function openPopupTxns(title, txns){
+  const body = document.getElementById("popupBody");
+  document.getElementById("popupTitle").innerText = title;
+
+  if (!txns || txns.length === 0) {
+    body.innerHTML = "<p>No transactions to display.</p>";
+  } else {
+    let rowsHtml = `
+      <table>
+        <thead><tr>
+          <th>ID</th><th>Src</th><th>Dst</th><th>Amount</th><th>Type</th><th>Risk</th><th>Reasons</th>
+        </tr></thead><tbody>`;
+    txns.forEach(t=>{
+      rowsHtml += `
+        <tr class="${t.susp ? 'row-susp' : ''}">
+          <td>${t.id}</td>
+          <td>${t.src}</td>
+          <td>${t.dst}</td>
+          <td>${Number(t.amount).toLocaleString()}</td>
+          <td>${t.type}</td>
+          <td>${t.risk}</td>
+          <td>${t.reasons}</td>
+        </tr>`;
+    });
+    rowsHtml += `</tbody></table>`;
+    body.innerHTML = rowsHtml;
+  }
+
+  document.getElementById("backdrop").style.display = "block";
+  document.getElementById("popup").style.display = "block";
+}
+
+function closePopup(){
+  document.getElementById("popup").style.display = "none";
+  document.getElementById("backdrop").style.display = "none";
+}
+
+// Export currently-shown popup content
+function downloadCSV(){
+  if(!selectedTxns.length) return;
+  const cols = ["id","src","dst","amount","type","risk","reasons"];
+  const header = cols.join(",") + "\n";
+  const body = selectedTxns.map(r => cols.map(c => {
+    const v = (r[c] ?? "").toString().replace(/"/g,'""');
+    return /[,"\n]/.test(v) ? `"${v}"` : v;
+  }).join(",")).join("\n");
+  const blob = new Blob([header + body], {type:"text/csv;charset=utf-8;"});
+  const name = selectedTxns.length === 1 ? `transaction_${selectedTxns[0].id}.csv` : `transactions_${Date.now()}.csv`;
+  saveAs(blob, name);
+}
+
+function downloadPDF(){
+  if(!selectedTxns.length) return;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.text("Transaction Report", 10, 10);
+  let y = 20;
+  selectedTxns.forEach((r, idx)=>{
+    doc.text(`ID: ${r.id}`, 10, y); y+=6;
+    doc.text(`Src: ${r.src}  ->  Dst: ${r.dst}`, 10, y); y+=6;
+    doc.text(`Amount: ${r.amount}    Type: ${r.type}    Risk: ${r.risk}`, 10, y); y+=6;
+    doc.text(`Reasons: ${r.reasons}`, 10, y); y+=8;
+    if (y > 270 && idx < selectedTxns.length-1){ doc.addPage(); y = 20; }
+  });
+  const name = selectedTxns.length === 1 ? `transaction_${selectedTxns[0].id}.pdf` : `transactions_${Date.now()}.pdf`;
+  doc.save(name);
+}
+
+// Scatter chart
+function drawScatter(){
+  const ctx = document.getElementById("scatter");
+  if (scatterChart) scatterChart.destroy();
+  scatterChart = new Chart(ctx, {
+    type: "scatter",
+    data: {
+      datasets: [{
+        label: "Transactions",
+        data: resultRows.map((r,i)=>({
+          x: i,
+          y: Number(r.amount),
+          r: r.susp ? 6 : 3,
+          backgroundColor: r.in_cycle ? "orange" : (r.susp ? "red" : "skyblue")
+        })),
+        parsing: false,
+        pointRadius: c => c.raw.r,
+        pointBackgroundColor: c => c.raw.backgroundColor
+      }]
+    },
+    options: {
+      scales: { x: { title: { display:true, text:"Index" } },
+                y: { title: { display:true, text:"Amount" } } }
+    }
+  });
+}
+</script>
+
+</body>
+</html>

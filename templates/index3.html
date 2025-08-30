@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Official Login</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  
+  body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:#0f172a;font-family:system-ui,sans-serif;color:#e5e7eb}
+  .card{width:360px;background:#111827;padding:24px;border-radius:14px;box-shadow:0 8px 30px rgba(0,0,0,.45)}
+  h2{margin:0 0 12px;color:#38bdf8}
+  label{font-size:12px;opacity:.85}
+  input,select,button{width:100%;padding:10px;margin:6px 0;border-radius:10px;border:1px solid #1f2937;background:#0f172a;color:#e5e7eb}
+  button{background:#0c4a6e;border:1px solid #155e75;cursor:pointer;font-weight:700}
+  button:hover{background:#155e75}
+  .error{color:#ef4444;min-height:18px;margin-bottom:6px}
+  .hint{font-size:12px;opacity:.8;margin-top:8px}
+
+</style>
+</head>
+<body>
+  <div class="card">
+    <h2>Official Login</h2>
+    <div class="error">{{ error or "" }}</div>
+    <form method="POST" action="/login">
+      <label>Region</label>
+      <select name="region" required>
+        <option value="Indore">Indore</option>
+        <option value="Bhopal">Bhopal</option>
+        <option value="Dewas">Dewas</option>
+      </select>
+      <label>Username</label>
+      <input name="username" placeholder="admin_indore" required />
+      <label>Password</label>
+      <input name="password" type="password" placeholder="••••" required />
+      <button type="submit">Login</button>
+      <div class="hint">Default creds: admin_indore/1234 • admin_bhopal/5678 • admin_dewas/9999</div>
+    </form>
+  </div>
+</body>
+</html>
+
